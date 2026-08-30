@@ -730,6 +730,3 @@ Launch the interactive step-by-step debugger with:
 
 ---
 
-## License
-
-MIT License. Designed for deep educational exploration of Operating Systems and Go Runtime internals.
