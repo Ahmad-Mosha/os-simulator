@@ -58,6 +58,9 @@ func Magenta(text string) string { return Colorize(FgMagenta, text) }
 func Gray(text string) string    { return Colorize(FgHiBlack, text) }
 func HiCyan(text string) string  { return Colorize(FgHiCyan, text) }
 func HiGreen(text string) string { return Colorize(FgHiGreen, text) }
+func HiYellow(text string) string { return Colorize(FgHiYellow, text) }
+func HiRed(text string) string   { return Colorize(FgHiRed, text) }
+func HiMagenta(text string) string { return Colorize(FgHiMagenta, text) }
 
 // SectionHeader formats a main section banner
 func SectionHeader(title string) string {

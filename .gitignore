@@ -1,0 +1,6 @@
+# Binaries
+os-sim
+bin/
+*.exe
+*.test
+*.out
