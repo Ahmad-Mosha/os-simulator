@@ -1,5 +1,5 @@
 # Binaries
-os-sim
+/os-sim
 bin/
 *.exe
 *.test
