@@ -1,6 +1,6 @@
 # Operating System Simulator & Educational Lab (`os-simulator`)
 
-A comprehensive, production-grade Operating System simulator and interactive laboratory built from scratch in Go. This project bridges theoretical operating system fundamentals—based on the renowned textbook **Operating Systems: Three Easy Pieces (OSTEP)**—with real-world systems programming and **Go Runtime internals** (M:N scheduler, GMP model, netpoller, dynamic stack allocation, and memory management).
+A comprehensive, production-grade Operating System simulator and interactive laboratory built from scratch in Go. This project bridges theoretical operating system fundamentals—based on the renowned textbook **Operating Systems: Three Easy Pieces (OSTEP)**—with real-world systems programming, hardware-kernel boundaries, and **Go Runtime internals** (M:N scheduler, GMP model, netpoller, dynamic stack allocation, and memory management).
 
 ---
 
@@ -8,13 +8,20 @@ A comprehensive, production-grade Operating System simulator and interactive lab
 
 1. [Architecture & Project Overview](#architecture--project-overview)
 2. [Quick Start & Interactive CLI](#quick-start--interactive-cli)
-3. [Deep Dive: CPU Virtualization](#deep-dive-cpu-virtualization)
+3. [Deep Dive: Kernel & Hardware Boundary](#deep-dive-kernel--hardware-boundary)
+   - [User Mode (Ring 3) vs Kernel Mode (Ring 0)](#user-mode-ring-3-vs-kernel-mode-ring-0)
+   - [System Calls & Calling Conventions (x86-64 ABI)](#system-calls--calling-conventions-x86-64-abi)
+   - [Traps, CPU Exceptions & Interrupt Descriptor Table (IDT)](#traps-cpu-exceptions--interrupt-descriptor-table-idt)
+   - [Unix Process Lifecycle: fork, exec, wait, exit, Zombies & Orphans](#unix-process-lifecycle-fork-exec-wait-exit-zombies--orphans)
+   - [Process Memory Isolation & Protection Faults](#process-memory-isolation--protection-faults)
+   - [Inter-Process Communication (IPC: Pipes, Shared Memory, Message Queues)](#inter-process-communication-ipc)
+4. [Deep Dive: CPU Virtualization](#deep-dive-cpu-virtualization)
    - [Process (PCB) vs Thread (TCB) vs Goroutine (G)](#process-pcb-vs-thread-tcb-vs-goroutine-g)
    - [Why Threads and Goroutines Have Private Stacks](#why-threads-and-goroutines-have-private-stacks)
    - [Context Switching Mechanics & Hardware Costs](#context-switching-mechanics--hardware-costs)
    - [CPU Scheduling Algorithms (FIFO, SJF, STCF, RR, MLFQ, Lottery)](#cpu-scheduling-algorithms)
    - [The Go Runtime M:N Scheduler (GMP Model & Work Stealing)](#the-go-runtime-mn-scheduler-gmp-model)
-4. [Deep Dive: Memory Virtualization](#deep-dive-memory-virtualization)
+5. [Deep Dive: Memory Virtualization](#deep-dive-memory-virtualization)
    - [Virtual Address Space Layout](#virtual-address-space-layout)
    - [Stack vs Heap Internals](#stack-vs-heap-internals)
    - [Dynamic Memory Allocators (Free-List & Buddy Allocator)](#dynamic-memory-allocators)
@@ -22,7 +29,7 @@ A comprehensive, production-grade Operating System simulator and interactive lab
    - [Multi-Level Page Tables & Sparse Address Spaces](#multi-level-page-tables)
    - [Translation Lookaside Buffer (TLB Cache)](#translation-lookaside-buffer-tlb-cache)
    - [Page Faults, Swap Space & Replacement Policies (Clock/LRU)](#page-faults-swap-space--replacement-policies)
-5. [Deep Dive: Concurrency & Synchronization](#deep-dive-concurrency--synchronization)
+6. [Deep Dive: Concurrency & Synchronization](#deep-dive-concurrency--synchronization)
    - [Data Races & Hardware Interleaving (Assembly Trace)](#data-races--hardware-interleaving)
    - [Hardware Atomics (CAS, Test-and-Set, Fetch-and-Add)](#hardware-atomics)
    - [Spinlocks vs Blocking Mutexes (Futex Mechanics)](#spinlocks-vs-blocking-mutexes)
@@ -30,12 +37,13 @@ A comprehensive, production-grade Operating System simulator and interactive lab
    - [Semaphores & Reader-Writer Locks](#semaphores--reader-writer-locks)
    - [Deadlocks, Coffman Conditions & Banker's Algorithm](#deadlocks-coffman-conditions--bankers-algorithm)
    - [Dining Philosophers Problem & Resource Hierarchy Proof](#dining-philosophers-problem)
-6. [Deep Dive: I/O Models & Event Multiplexing](#deep-dive-io-models--event-multiplexing)
+7. [Deep Dive: I/O Models & Event Multiplexing](#deep-dive-io-models--event-multiplexing)
    - [Blocking I/O vs Non-Blocking I/O](#blocking-io-vs-non-blocking-io)
    - [Select/Poll $O(N)$ Bottleneck vs Epoll $O(1)$ Architecture](#selectpoll-on-bottleneck-vs-epoll-o1-architecture)
    - [Go Runtime Netpoller Integration](#go-runtime-netpoller-integration)
-7. [Concurrency vs True Parallelism](#concurrency-vs-true-parallelism)
-8. [Codebase & Package Reference Guide](#codebase--package-reference-guide)
+8. [Concurrency vs True Parallelism](#concurrency-vs-true-parallelism)
+9. [Step-by-Step Interactive Debugger](#step-by-step-interactive-debugger)
+10. [Codebase & Package Reference Guide](#codebase--package-reference-guide)
 
 ---
 
@@ -49,6 +57,17 @@ os-simulator/
 │   └── os-sim/
 │       └── main.go              # Interactive CLI / TUI with ANSI visuals & lab runners
 ├── pkg/
+│   ├── kernel/                  # Kernel Core & Hardware-OS Boundary
+│   │   ├── cpu_mode.go          # User Mode (Ring 3) vs Kernel Mode (Ring 0), privilege traps
+│   │   ├── trap_table.go        # IDT / Trap Vector Table, Exceptions, Hardware Interrupts & ISRs
+│   │   ├── syscall.go           # Syscall Dispatcher, calling convention (RAX, RDI..), validation
+│   │   ├── process_lifecycle.go # fork(), exec(), exit(), wait(), Zombie & Orphan state machine
+│   │   ├── isolation.go         # Virtual address space isolation & hardware memory protection faults
+│   │   └── os_kernel.go         # Unified OS Kernel integrating CPU, Memory, Threads, Locks & IPC
+│   ├── ipc/                     # Inter-Process Communication
+│   │   ├── pipe.go              # Unix Pipes: circular ring buffer, blocking read/write, EOF, SIGPIPE
+│   │   ├── shared_memory.go     # Shared Physical Frames (zero-copy), multiple VA mappings & IPC semaphores
+│   │   └── message_queue.go     # Message Queues: typed priority message passing
 │   ├── cpu/                     # CPU Virtualization, Schedulers & Go GMP Runtime
 │   │   ├── process.go           # Process Control Block (PCB), lifecycle states, hardware registers
 │   │   ├── thread.go            # Thread Control Block (TCB) & private stack boundaries
@@ -107,35 +126,178 @@ go test -v ./pkg/...
 ```
 
 ### Interactive Menu
-Run `./os-sim` without arguments to launch the interactive terminal menu:
+Run `./os-sim` without arguments to launch the interactive console:
 ```
 ══════════════════════════════════════════════════════════════════════
 ║               OS SIMULATOR & LAB: INTERACTIVE CONSOLE              ║
 ══════════════════════════════════════════════════════════════════════
 
 Select an Operating System Lab to run:
-  [1] CPU Scheduling & Context Switching (FIFO, SJF, STCF, RR, MLFQ, Lottery)
-  [2] Go Runtime M:N Scheduler (GMP Model, Work Stealing, Stack Dynamics)
-  [3] Memory Virtualization (Address Space, Stack vs Heap, Free-List & Buddy)
-  [4] Hardware Paging, Multi-Level Page Tables, TLB Cache & Clock Replacement
-  [5] Concurrency Primitives, Data Races, Atomics, Mutex, Semaphores, CondVar
-  [6] Deadlock Avoidance, Banker's Algorithm & Dining Philosophers
-  [7] I/O Models, Epoll O(1) Architecture & Go Netpoller Integration
-  [8] Concurrency vs True Parallelism Multi-Core Hardware Benchmarks
-  [9] Run Complete Guided Tour (All Labs)
+── Operating System Kernel & Hardware Boundary ────────────────────────
+  [1] User Mode vs Kernel Mode & Traps (Ring 0 vs Ring 3)
+  [2] System Calls Dispatcher & Register Calling Convention
+  [3] Unix Process Lifecycle (fork, exec, exit, wait, Zombies & Orphans)
+  [4] Process Memory Isolation & Protection Faults
+  [5] Inter-Process Communication (Unix Pipes & Shared Memory)
+  [6] Unified OS Kernel Step-by-Step Interactive Debugger
+
+── CPU, Memory & Concurrency Fundamentals (OSTEP) ─────────────────────
+  [7] CPU Scheduling & Context Switching (FIFO, SJF, STCF, RR, MLFQ, Lottery)
+  [8] Go Runtime M:N Scheduler (GMP Model, Work Stealing, Stack Dynamics)
+  [9] Memory Virtualization (Address Space, Stack vs Heap, Free-List & Buddy)
+ [10] Hardware Paging, Multi-Level Page Tables, TLB Cache & Clock Replacement
+ [11] Concurrency Primitives, Data Races, Atomics, Mutex, Semaphores, CondVar
+ [12] Deadlock Avoidance, Banker's Algorithm & Dining Philosophers
+ [13] I/O Models, Epoll O(1) Architecture & Go Netpoller Integration
+ [14] Concurrency vs True Parallelism Multi-Core Hardware Benchmarks
+ [15] Run Complete Guided Tour (All Labs)
   [0] Exit
 ```
 
-### Direct CLI Subcommands
-- `./os-sim cpu` — Run CPU Scheduling simulations with Gantt charts.
-- `./os-sim gmp` — Run Go GMP M:N runtime work-stealing simulation.
-- `./os-sim memory` — Run Address Space, Stack vs Heap, and Allocator labs.
-- `./os-sim paging` — Run Address Translation, Two-Level Page Tables, TLB, and Clock Replacement.
-- `./os-sim concurrency` — Run Data Race reproduction, Mutex vs Spinlock, and Condition Variables.
-- `./os-sim deadlock` — Run Banker's Algorithm safe sequence and Dining Philosophers.
-- `./os-sim io` — Run Blocking vs Select/Poll vs Epoll and Netpoller comparisons.
-- `./os-sim bench` — Run Concurrency vs Parallelism live CPU benchmarks.
-- `./os-sim all` — Run all 8 labs in sequence.
+---
+
+## Deep Dive: Kernel & Hardware Boundary
+
+### User Mode (Ring 3) vs Kernel Mode (Ring 0)
+
+| Dimension | User Mode (Ring 3) | Kernel Mode (Ring 0 / Supervisor) |
+| :--- | :--- | :--- |
+| **Privilege Level** | Lowest (Restricted) | Highest (Full Supervisor) |
+| **Memory Access** | User Virtual Address Space segments only | All physical & virtual memory directly |
+| **Privileged Instructions** | Blocked (Triggers `#GP` General Protection Fault) | Allowed (`HLT`, `CLI`, `STI`, `MOV CR3`, `IN/OUT`) |
+| **I/O Device Access** | Restricted (Must request via Syscall) | Direct device bus access (Ports, MMIO) |
+| **Stack Used** | User Space Stack | Private Kernel Stack (Safe from user corruption) |
+
+#### Why Dual-Mode CPU Operation is Essential:
+1. **Fault Isolation**: A crashing user program (e.g. division by zero, segfault) cannot crash other programs or bring down the operating system.
+2. **Security & Access Control**: Prevents user processes from reading passwords out of raw physical RAM or altering hardware registers directly.
+3. **Controlled Gateways**: User code enters Kernel Mode *only* through controlled gates: **Traps**, **System Calls**, and **Hardware Interrupts**.
+
+---
+
+### System Calls & Calling Conventions (x86-64 ABI)
+
+A System Call is the programmatic interface by which user-space software requests services from the operating system kernel.
+
+```
+User Program (Ring 3)                    Kernel Mode (Ring 0)
+─────────────────────                    ────────────────────
+1. Load RAX = 6 (sys_write)
+2. Load RDI = 1 (stdout)
+3. Load RSI = 0x00401000 (buf)
+4. Load RDX = 28 (count)
+5. Execute: SYSCALL / INT 0x80  ─────►   6. CPU switches to Ring 0 & Kernel Stack
+                                         7. Validate user pointers (< 0xC0000000)
+                                         8. Lookup SyscallTable[RAX]
+                                         9. Execute sys_write handler
+12. Read return value from RAX  ◄─────  10. Set RAX = 28 (bytes written)
+                                        11. Execute: SYSRET / IRET
+```
+
+#### Calling Convention Register Mapping:
+- `RAX`: System call number (input) / Return code or `-errno` (output)
+- `RDI`: 1st argument (e.g. `int fd`)
+- `RSI`: 2nd argument (e.g. `const void *buf`)
+- `RDX`: 3rd argument (e.g. `size_t count`)
+- `R10`, `R8`, `R9`: 4th, 5th, 6th arguments
+
+#### Pointer Sanitization in Kernel Mode:
+User programs could pass malicious pointers into kernel space (e.g. `0xC0000000+`). The kernel validates all user pointers before dereferencing; any invalid pointer immediately returns `-EFAULT` to protect kernel memory.
+
+---
+
+### Traps, CPU Exceptions & Interrupt Descriptor Table (IDT)
+
+The CPU uses the **Interrupt Descriptor Table (IDT)** to route hardware interrupts, CPU exceptions, and software traps to the appropriate **Interrupt Service Routine (ISR)**:
+
+```
+┌────────┬────────────────────────────────┬─────────────────┬──────────────────────────────────────────┐
+│ Vector │ Name                           │ Classification  │ Description                              │
+├────────┼────────────────────────────────┼─────────────────┼──────────────────────────────────────────┤
+│ 0x00   │ Divide-by-Zero (#DE)           │ CPU Exception   │ Integer division by zero                 │
+│ 0x06   │ Invalid Opcode (#UD)           │ CPU Exception   │ CPU encountered unknown instruction      │
+│ 0x0D   │ General Protection Fault (#GP) │ CPU Exception   │ Privilege violation (e.g. HLT in Ring 3) │
+│ 0x0E   │ Page Fault (#PF)               │ CPU Exception   │ Page not present in RAM / bad access     │
+│ 0x20   │ PIT Timer Interrupt (IRQ 0)    │ Hardware IRQ    │ Periodic timer for CPU preemption        │
+│ 0x21   │ Keyboard Controller (IRQ 1)    │ Hardware IRQ    │ Key press / release event                │
+│ 0x80   │ System Call Gate (INT 0x80)    │ Software Trap   │ User space requesting kernel service     │
+└────────┴────────────────────────────────┴─────────────────┴──────────────────────────────────────────┘
+```
+
+---
+
+### Unix Process Lifecycle: `fork`, `exec`, `wait`, `exit`, Zombies & Orphans
+
+```
+                  ┌──────────────┐
+                  │   fork()     │  Duplicates PCB & Address Space
+                  └──────┬───────┘
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+   Parent Process                 Child Process
+ (Receives Child PID)           (Receives RAX = 0)
+          │                             │
+          │                       ┌─────▼────────┐
+          │                       │   execve()   │  Replaces code image & stack
+          │                       └─────┬────────┘
+          │                             │
+          │                       ┌─────▼────────┐
+          │                       │    exit()    │  Releases memory, stores exit code
+          │                       └─────┬────────┘
+          │                             │
+          │                             ▼
+          │                       ┌──────────────┐
+          │                       │ ZOMBIE STATE │  (Holds exit status in PCB)
+          │                       └──────┬───────┘
+          │                              │
+          │    ┌─────────────────────────┘
+          ▼    ▼
+    ┌──────────────┐
+    │    wait()    │  Parent reads child exit status & REAPS zombie PCB
+    └──────────────┘
+```
+
+- **`fork()`**: Clones the calling process. The child receives an exact duplicate of the virtual address space and file descriptors.
+- **`execve(path, argv)`**: Replaces the process memory layout with a new executable program, preserving PID, PPID, and open file descriptors.
+- **`exit(code)`**: Frees process virtual memory. The process enters the **`ZOMBIE`** state, preserving its exit code in its PCB until the parent calls `wait()`.
+- **`wait()` / `waitpid()`**: Blocks the parent until the child terminates, reads the exit code, and **reaps** (destroys) the child PCB.
+- **Orphan Processes**: If a parent process dies before its children, the **`init` process (PID 1)** automatically adopts the orphaned children and reaps them when they exit.
+
+---
+
+### Process Memory Isolation & Protection Faults
+
+Virtual memory guarantees that every process operates in a private, isolated address space:
+
+```
+Process A (PID 100)                     Physical RAM (Hardware)
+Virtual Address: 0x00401050 ──► VPN 0x401 ──► PFN 12 (0x0000C050) ["Secret_Token_A"]
+
+Process B (PID 200)
+Virtual Address: 0x00401050 ──► VPN 0x401 ──► PFN 88 (0x00058050) ["Public_Data_B"]
+```
+
+- **Zero Collisions**: Even though Process A and Process B use the exact same virtual address `0x00401050`, the MMU translates them to completely different physical frames.
+- **Hardware Protection**: If Process B attempts to access physical frames outside its Page Table, the MMU triggers an immediate **Page Fault Exception (`#PF` / `SIGSEGV`)**.
+
+---
+
+### Inter-Process Communication (IPC)
+
+#### 1. Unix Anonymous Pipes
+- Unidirectional in-kernel circular ring buffer.
+- `pipe(int fds[2])`: `fds[0]` (read end), `fds[1]` (write end).
+- Automatic blocking synchronization: Reading from an empty pipe blocks; writing to a full pipe blocks (flow control / backpressure).
+- Closing the write end delivers `EOF` (0 bytes) to the reader. Writing to a closed read end raises `SIGPIPE`.
+
+#### 2. Shared Memory (`shmget`, `shmat`)
+- The kernel maps the **exact same physical frame (PFN)** into multiple processes' Page Tables.
+- **Zero-Copy Performance**: Processes read/write directly to physical RAM at hardware bus speed without memory copies or syscall overhead!
+- **Synchronization**: Because access bypasses the kernel, processes must use **IPC Semaphores** to avoid data races.
+
+#### 3. Message Queues
+- Kernel-managed linked lists of typed structured messages (`msgsnd`, `msgrcv`).
 
 ---
 
@@ -489,7 +651,39 @@ Adding 64 CPU cores **does not guarantee 64x speedup** if goroutines contend hea
 
 ---
 
+## Step-by-Step Interactive Debugger
+
+Launch the interactive step-by-step debugger with:
+```bash
+./os-sim debug
+```
+
+### Available Debugger Commands:
+- `step [N]` / `s [N]`: Advance kernel execution by $N$ hardware CPU ticks (triggers timer interrupts and context switches).
+- `dash` / `d`: Redraw the live operating system dashboard (CPU, Process Table, TLB hit rates, memory stats).
+- `fork` / `f`: Execute `sys_fork()` to clone the current running process.
+- `exec <name>` / `e <name>`: Execute `sys_execve()` to load a new executable binary into the running process.
+- `kill [PID]` / `exit [PID]`: Terminate a process with exit code 0, turning it into a `ZOMBIE`.
+- `wait [parentPID]` / `w`: Call `sys_waitpid()` to reap a zombie child process and destroy its PCB.
+- `ps`: Print the active Unix Process Table and parent/child hierarchies.
+- `quit` / `q`: Exit the debugger.
+
+---
+
 ## Codebase & Package Reference Guide
+
+### `pkg/kernel`
+- `HardwareCPU`: Dual-mode CPU execution simulator (Ring 0 vs Ring 3) and register context.
+- `TrapTable`: Interrupt Descriptor Table (IDT) routing CPU exceptions, interrupts, and syscall gates.
+- `SyscallDispatcher`: System call dispatch engine implementing x86-64 calling conventions and pointer validation.
+- `ProcessManager`: Unix process lifecycle engine managing `fork`, `exec`, `exit`, `wait`, zombies, and orphan adoption by `init`.
+- `MemoryIsolationLab`: Proves virtual memory isolation and protection faults.
+- `OSKernel`: Unified OS kernel coordinating CPU scheduling, memory management, syscalls, and IPC.
+
+### `pkg/ipc`
+- `UnixPipe`: Anonymous Unix pipe with in-kernel ring buffer and blocking read/write flow control.
+- `SharedMemoryManager`: Zero-copy shared physical frames with IPC semaphores.
+- `MessageQueue`: Kernel message queue with typed message passing.
 
 ### `pkg/cpu`
 - `Process`: Represents Process Control Block (PCB) with states, priority, registers, and metrics.
