@@ -81,7 +81,11 @@ func SectionHeader(title string) string {
 
 // SubHeader formats a subsection header
 func SubHeader(title string) string {
-	return fmt.Sprintf("\n%s── %s%s %s\n", FgHiYellow, Bold+FgHiWhite, title, FgHiYellow+strings.Repeat("─", 50-len(title))+Reset)
+	pad := 70 - len(title)
+	if pad < 4 {
+		pad = 4
+	}
+	return fmt.Sprintf("\n%s── %s%s %s\n", FgHiYellow, Bold+FgHiWhite, title, FgHiYellow+strings.Repeat("─", pad)+Reset)
 }
 
 // Box creates an enclosed decorative box around content
